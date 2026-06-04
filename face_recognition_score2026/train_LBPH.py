@@ -77,7 +77,7 @@ def train_face_model(dataset_path, output_model="face_recognizer_model.xml"):
                         valid_count += 1
                 except:
                     pass
-        print(f"✅ {folder} 有效图：{valid_count}")
+        print(f"[OK] {folder} 有效图: {valid_count}")
 
     # LBPH参数
     recognizer = cv2.face.LBPHFaceRecognizer_create(
@@ -101,8 +101,8 @@ def train_face_model(dataset_path, output_model="face_recognizer_model.xml"):
             "id_to_name": {v: k for k, v in label_dict.items()}
         }, f, indent=4)
 
-    print(f"✅ 模型训练完成！保存至：{output_model}")
-    print(f"✅ 标签映射保存至：{label_path}")
+    print(f"[OK] 模型训练完成! 保存至: {output_model}")
+    print(f"[OK] 标签映射保存至: {label_path}")
 
 
 if __name__ == "__main__":
@@ -111,6 +111,6 @@ if __name__ == "__main__":
     output_model = os.path.join(current_dir, "Algorithm", "face_recognizer_model.xml")
 
     if not os.path.exists(dataset_path):
-        print(f"❌ 数据集路径不存在：{dataset_path}")
+        print(f"[ERROR] 数据集路径不存在: {dataset_path}")
     else:
         train_face_model(dataset_path, output_model)

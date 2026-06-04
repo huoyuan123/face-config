@@ -20,7 +20,7 @@ def split_dataset(source_dir, train_dir, test_dir, train_ratio=0.8):
 
     # 遍历所有人物文件夹
     for person_dir in sorted(os.listdir(source_dir)):
-        if not re.match(r'^\d{10}$', person_dir):
+        if not re.match(r'^\d{6,12}$', person_dir):
             continue
 
         print(f"正在处理：{person_dir}")
@@ -65,4 +65,4 @@ if __name__ == "__main__":
     test_directory = os.path.join(current_dir, 'TestData', 'Faces_test')
 
     split_dataset(source_directory, train_directory, test_directory)
-    print("✅ 数据集随机 8:2 分割完成！")
+    print("[OK] 数据集随机 8:2 分割完成!")

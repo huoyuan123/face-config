@@ -116,6 +116,7 @@ def load_face_model():
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.text_factory = lambda b: b.decode('utf-8', errors='replace')
     return conn
 
 def init_db():
