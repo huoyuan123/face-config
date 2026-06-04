@@ -288,30 +288,30 @@ def api_checkin():
     if session.get('role') != 'student':
         return jsonify({'success': False, 'message': '仅学生可签到'})
 
-    # 检查签到是否开启
     conn = get_db()
     cur = conn.cursor()
+    # 获取当前会话信息
     cur.execute(
-        'SELECT is_active FROM checkin_session ORDER BY id DESC LIMIT 1')
-    row = cur.fetchone()
-    if not row or row['is_active'] != 1:
+        'SELECT id, start_time, is_active FROM checkin_session ORDER BY id DESC LIMIT 1')
+    session_row = cur.fetchone()
+    if not session_row or session_row['is_active'] != 1:
         conn.close()
         return jsonify({'success': False, 'message': '教师尚未开启签到'})
 
     student_id = session['user_id']
     today_str = date.today().strftime('%Y-%m-%d')
     now_str = datetime.now().strftime('%H:%M:%S')
+    session_start = session_row['start_time']
 
-    # 检查今天是否已签到
+    # 检查是否已在当前会话签到
     cur.execute(
-        'SELECT is_signed FROM face_recognition_record '
-        'WHERE student_id=? AND record_date=?',
-        (student_id, today_str))
-    record = cur.fetchone()
-    if record and record['is_signed'] == 1:
+        'SELECT id FROM face_recognition_record '
+        'WHERE student_id=? AND record_date=? AND recognition_time >= ?',
+        (student_id, today_str, session_start))
+    if cur.fetchone():
         conn.close()
-        checkin_logger.info(f'重复签到: {student_id} {session["user_name"]}')
-        return jsonify({'success': False, 'message': '今天已签到，无需重复签到'})
+        checkin_logger.info(f'本会话已签到: {student_id} {session["user_name"]}')
+        return jsonify({'success': False, 'message': '本会话已签到，无需重复签到'})
 
     # 人脸识别
     image_data = request.get_json().get('image', '')
@@ -326,10 +326,7 @@ def api_checkin():
         conn.close()
         checkin_logger.warning(
             f'签到失败-身份不匹配: {student_id} {session["user_name"]} 识别为 {predicted_id}')
-        return jsonify({
-            'success': False,
-            'message': f'人脸验证失败，请确认是本人'
-        })
+        return jsonify({'success': False, 'message': '人脸验证失败，请确认是本人'})
 
     if confidence is not None and confidence >= 125:
         conn.close()
@@ -337,18 +334,12 @@ def api_checkin():
             f'签到失败-置信度不足: {student_id} {session["user_name"]} confidence={confidence:.0f}')
         return jsonify({'success': False, 'message': '人脸匹配度不足，请调整光线和角度'})
 
-    # 签到成功，更新记录
-    if record:
-        cur.execute(
-            'UPDATE face_recognition_record SET is_signed=1, recognition_time=? '
-            'WHERE student_id=? AND record_date=?',
-            (now_str, student_id, today_str))
-    else:
-        cur.execute(
-            'INSERT INTO face_recognition_record '
-            '(student_id, record_date, recognition_time, is_signed) '
-            'VALUES (?, ?, ?, 1)',
-            (student_id, today_str, now_str))
+    # 签到成功，始终插入新记录(支持一天多次签到，保留全部历史)
+    cur.execute(
+        'INSERT INTO face_recognition_record '
+        '(student_id, record_date, recognition_time, is_signed) '
+        'VALUES (?, ?, ?, 1)',
+        (student_id, today_str, now_str))
     conn.commit()
     conn.close()
 
@@ -372,14 +363,22 @@ def api_student_today_status():
     today_str = date.today().strftime('%Y-%m-%d')
     conn = get_db()
     cur = conn.cursor()
+    # 获取当前活跃会话开始时间
     cur.execute(
-        'SELECT is_signed, recognition_time FROM face_recognition_record '
-        'WHERE student_id=? AND record_date=?',
-        (student_id, today_str))
-    row = cur.fetchone()
+        'SELECT start_time FROM checkin_session WHERE is_active=1 ORDER BY id DESC LIMIT 1')
+    session_row = cur.fetchone()
+    if session_row:
+        session_start = session_row['start_time']
+        cur.execute(
+            'SELECT recognition_time FROM face_recognition_record '
+            'WHERE student_id=? AND record_date=? AND recognition_time >= ? '
+            'ORDER BY id DESC LIMIT 1',
+            (student_id, today_str, session_start))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            return jsonify({'signed': True, 'time': row['recognition_time'] or ''})
     conn.close()
-    if row and row['is_signed'] == 1:
-        return jsonify({'signed': True, 'time': row['recognition_time'] or ''})
     return jsonify({'signed': False, 'time': ''})
 
 # ===================== API: 学生查看自己的签到记录 =====================
@@ -431,7 +430,7 @@ def api_toggle_checkin():
         cur.execute(
             'INSERT INTO checkin_session (session_date, start_time, is_active) VALUES (?, ?, 1)',
             (today_str, now_str))
-        # 为所有学生补全今日记录,同时重置签到状态(支持一天多次签到)
+        # 为所有学生补全今日记录(仅未签到状态用于初始显示)
         cur.execute('SELECT id FROM student')
         all_ids = [row['id'] for row in cur.fetchall()]
         cur.execute(
@@ -445,10 +444,6 @@ def api_toggle_checkin():
                     '(student_id, record_date, recognition_time, is_signed) '
                     'VALUES (?, ?, NULL, 0)',
                     (sid, today_str))
-        # 重置今日所有学生的签到状态,支持一天内多次签到
-        cur.execute(
-            'UPDATE face_recognition_record SET is_signed=0, recognition_time=NULL WHERE record_date=?',
-            (today_str,))
         conn.commit()
         conn.close()
         app_logger.info(f'教师 {session["user_name"]} 开启签到 [{today_str} {now_str}]')
@@ -510,39 +505,38 @@ def api_teacher_records():
     conn = get_db()
     cur = conn.cursor()
 
-    # 自动补全当日记录
-    cur.execute('SELECT id FROM student')
-    all_ids = [row['id'] for row in cur.fetchall()]
-    cur.execute(
-        'SELECT student_id FROM face_recognition_record WHERE record_date=?',
-        (date_str,))
-    existing = set(row['student_id'] for row in cur.fetchall())
-    for sid in all_ids:
-        if sid not in existing:
-            cur.execute(
-                'INSERT INTO face_recognition_record '
-                '(student_id, record_date, recognition_time, is_signed) '
-                'VALUES (?, ?, NULL, 0)', (sid, date_str))
-
+    # 查询每个学生当日最新的一条签到记录
     if class_filter and class_filter != '全部':
         cur.execute('''
             SELECT s.id, s.name, s.class, r.is_signed, r.recognition_time
-            FROM face_recognition_record r
-            JOIN student s ON r.student_id = s.id
-            WHERE r.record_date=? AND s.class=?
-            ORDER BY r.is_signed ASC, s.id ASC
-        ''', (date_str, class_filter))
+            FROM student s
+            LEFT JOIN (
+                SELECT student_id, is_signed, recognition_time
+                FROM face_recognition_record
+                WHERE record_date=? AND id IN (
+                    SELECT MAX(id) FROM face_recognition_record
+                    WHERE record_date=? GROUP BY student_id
+                )
+            ) r ON s.id = r.student_id
+            WHERE s.class=?
+            ORDER BY COALESCE(r.is_signed, 0) ASC, s.id ASC
+        ''', (date_str, date_str, class_filter))
     else:
         cur.execute('''
             SELECT s.id, s.name, s.class, r.is_signed, r.recognition_time
-            FROM face_recognition_record r
-            JOIN student s ON r.student_id = s.id
-            WHERE r.record_date=?
-            ORDER BY r.is_signed ASC, s.id ASC
-        ''', (date_str,))
+            FROM student s
+            LEFT JOIN (
+                SELECT student_id, is_signed, recognition_time
+                FROM face_recognition_record
+                WHERE record_date=? AND id IN (
+                    SELECT MAX(id) FROM face_recognition_record
+                    WHERE record_date=? GROUP BY student_id
+                )
+            ) r ON s.id = r.student_id
+            ORDER BY COALESCE(r.is_signed, 0) ASC, s.id ASC
+        ''', (date_str, date_str))
 
     rows = cur.fetchall()
-    conn.commit()
     conn.close()
 
     records = []
@@ -643,9 +637,11 @@ def api_edit_record():
         return jsonify({'success': False, 'message': '签到时间不能为空'})
     conn = get_db()
     cur = conn.cursor()
+    # 编辑该学生当日最新一条记录
     cur.execute(
         'UPDATE face_recognition_record SET is_signed=?, recognition_time=? '
-        'WHERE student_id=? AND record_date=?',
+        'WHERE id=(SELECT MAX(id) FROM face_recognition_record '
+        'WHERE student_id=? AND record_date=?)',
         (is_signed, rec_time, student_id, date_str))
     conn.commit()
     conn.close()
