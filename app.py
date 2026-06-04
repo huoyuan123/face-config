@@ -71,20 +71,21 @@ error_handler = TimedRotatingFileHandler(
 error_handler.setFormatter(LOG_FORMAT)
 error_logger.addHandler(error_handler)
 
-# Debug 模式会在 reloader 子进程中再次执行,避免日志重复
-_is_reloader_child = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
+# Debug 模式下 Flask 会启动 reloader,reloader 子进程才是真正的服务器
+_is_server = os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or \
+             'WERKZEUG_RUN_MAIN' not in os.environ
 
-if not _is_reloader_child:
-    # 控制台输出（仅 reloader 子进程输出,避免重复）
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(LOG_FORMAT)
+# 控制台输出 — 仅子进程输出,避免 reloader 父进程重复
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(LOG_FORMAT)
+if _is_server:
     app_logger.addHandler(console_handler)
 
-# Flask 内置 access log
+# Flask 内置 access log — 文件始终写,控制台仅 server 输出
 werkzeug_logger = logging.getLogger('werkzeug')
 werkzeug_logger.handlers = []
 werkzeug_logger.addHandler(file_handler)
-if not _is_reloader_child:
+if _is_server:
     werkzeug_logger.addHandler(console_handler)
 
 # ===================== 人脸识别模型初始化 =====================
@@ -112,9 +113,6 @@ def load_face_model():
         error_logger.warning(f'模型加载失败: {e}')
         model_loaded = False
 
-if not _is_reloader_child:
-    load_face_model()
-    init_db()
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -138,6 +136,10 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
+
+if _is_server:
+    load_face_model()
+    init_db()
 
 # ===================== 登录装饰器 =====================
 def login_required(f):
