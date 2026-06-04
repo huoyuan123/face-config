@@ -361,6 +361,26 @@ def api_checkin():
         'time': now_str
     })
 
+# ===================== API: 学生今日签到状态 =====================
+@app.route('/api/student/today-status')
+@login_required
+def api_student_today_status():
+    if session.get('role') != 'student':
+        return jsonify({'signed': False, 'time': ''})
+    student_id = session['user_id']
+    today_str = date.today().strftime('%Y-%m-%d')
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        'SELECT is_signed, recognition_time FROM face_recognition_record '
+        'WHERE student_id=? AND record_date=?',
+        (student_id, today_str))
+    row = cur.fetchone()
+    conn.close()
+    if row and row['is_signed'] == 1:
+        return jsonify({'signed': True, 'time': row['recognition_time'] or ''})
+    return jsonify({'signed': False, 'time': ''})
+
 # ===================== API: 学生查看自己的签到记录 =====================
 @app.route('/api/student/records')
 @login_required

@@ -1,5 +1,6 @@
 let videoStream = null;
 let checkinActive = false;
+let alreadySigned = false;
 
 async function init() {
     const resp = await fetch('/api/user-info');
@@ -16,13 +17,25 @@ async function init() {
 
 async function checkStatus() {
     try {
-        const resp = await fetch('/api/checkin-status');
-        const data = await resp.json();
-        checkinActive = data.active;
+        // 同时获取签到开启状态和学生自己的今日签到状态
+        const [sessionResp, todayResp] = await Promise.all([
+            fetch('/api/checkin-status'),
+            fetch('/api/student/today-status')
+        ]);
+        const sessionData = await sessionResp.json();
+        const todayData = await todayResp.json();
+
+        checkinActive = sessionData.active;
+        alreadySigned = todayData.signed;
         const btn = document.getElementById('checkinBtn');
         const statusEl = document.getElementById('checkinStatus');
 
-        if (checkinActive) {
+        if (alreadySigned) {
+            btn.disabled = true;
+            btn.textContent = '已签到';
+            statusEl.textContent = `今日已签到 (${todayData.time})`;
+            statusEl.className = 'checkin-status success';
+        } else if (checkinActive) {
             btn.disabled = false;
             btn.textContent = '签到';
             statusEl.textContent = '签到已开启，请对准摄像头点击签到';
@@ -78,15 +91,11 @@ async function doCheckin() {
         const data = await resp.json();
 
         if (data.success) {
-            statusEl.textContent = data.message;
+            alreadySigned = true;
+            statusEl.textContent = `签到成功！${data.time}`;
             statusEl.className = 'checkin-status success';
-            btn.textContent = '签到成功';
-            setTimeout(() => {
-                btn.textContent = '签到';
-                btn.disabled = false;
-                statusEl.textContent = '签到已开启，请对准摄像头点击签到';
-                statusEl.className = 'checkin-status waiting';
-            }, 3000);
+            btn.textContent = '已签到';
+            btn.disabled = true;
             loadRecords();
         } else {
             statusEl.textContent = data.message;
