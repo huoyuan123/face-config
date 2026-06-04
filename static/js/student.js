@@ -1,6 +1,7 @@
 let videoStream = null;
 let checkinActive = false;
 let alreadySigned = false;
+let lastSessionId = 0;
 
 async function init() {
     const resp = await fetch('/api/user-info');
@@ -26,7 +27,14 @@ async function checkStatus() {
         const todayData = await todayResp.json();
 
         checkinActive = sessionData.active;
-        // 只升级不降级: 签到成功 set true 后,不被旧请求的 false 覆盖
+
+        // 新会话开始 → 重置签到状态,允许重新签到
+        if (sessionData.session_id !== lastSessionId) {
+            lastSessionId = sessionData.session_id;
+            alreadySigned = false;
+        }
+
+        // 本会话已签到则锁定
         if (todayData.signed) alreadySigned = true;
         const btn = document.getElementById('checkinBtn');
         const statusEl = document.getElementById('checkinStatus');

@@ -274,11 +274,12 @@ def api_checkin_status():
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        'SELECT is_active FROM checkin_session ORDER BY id DESC LIMIT 1')
+        'SELECT id, is_active FROM checkin_session ORDER BY id DESC LIMIT 1')
     row = cur.fetchone()
     conn.close()
     active = row['is_active'] == 1 if row else False
-    return jsonify({'active': active})
+    session_id = row['id'] if row else 0
+    return jsonify({'active': active, 'session_id': session_id})
 
 # ===================== API: 人脸签到 =====================
 @app.route('/api/checkin', methods=['POST'])
@@ -430,7 +431,7 @@ def api_toggle_checkin():
         cur.execute(
             'INSERT INTO checkin_session (session_date, start_time, is_active) VALUES (?, ?, 1)',
             (today_str, now_str))
-        # 为所有学生补全今日记录
+        # 为所有学生补全今日记录,同时重置签到状态(支持一天多次签到)
         cur.execute('SELECT id FROM student')
         all_ids = [row['id'] for row in cur.fetchall()]
         cur.execute(
@@ -444,6 +445,10 @@ def api_toggle_checkin():
                     '(student_id, record_date, recognition_time, is_signed) '
                     'VALUES (?, ?, NULL, 0)',
                     (sid, today_str))
+        # 重置今日所有学生的签到状态,支持一天内多次签到
+        cur.execute(
+            'UPDATE face_recognition_record SET is_signed=0, recognition_time=NULL WHERE record_date=?',
+            (today_str,))
         conn.commit()
         conn.close()
         app_logger.info(f'教师 {session["user_name"]} 开启签到 [{today_str} {now_str}]')
