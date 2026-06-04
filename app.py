@@ -2,6 +2,8 @@ import os
 import base64
 import json
 import sqlite3
+import logging
+from logging.handlers import TimedRotatingFileHandler
 from datetime import datetime, date, timedelta
 from functools import wraps
 
@@ -12,6 +14,7 @@ from flask import Flask, render_template, request, jsonify, session, redirect, u
 # ===================== 配置 =====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'db1', 'attendance.db')
+LOG_DIR = os.path.join(BASE_DIR, 'logs')
 
 MODEL_DIR = os.path.join(BASE_DIR, 'face_recognition_score2026', 'Algorithm')
 MODEL_PATH = os.path.join(MODEL_DIR, 'face_recognizer_model.xml')
@@ -19,6 +22,70 @@ LABEL_MAPPING_PATH = os.path.join(MODEL_DIR, 'label_mapping.json')
 
 app = Flask(__name__)
 app.secret_key = 'face_attendance_system_2026_secret'
+
+# ===================== 日志系统 =====================
+os.makedirs(LOG_DIR, exist_ok=True)
+
+LOG_FORMAT = logging.Formatter(
+    '%(asctime)s | %(levelname)-7s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+# 主应用日志 — 每日轮转,保留30天
+app_logger = logging.getLogger('FaceAttendance')
+app_logger.setLevel(logging.INFO)
+
+file_handler = TimedRotatingFileHandler(
+    filename=os.path.join(LOG_DIR, 'app.log'),
+    when='midnight',
+    interval=1,
+    backupCount=30,
+    encoding='utf-8'
+)
+file_handler.setFormatter(LOG_FORMAT)
+app_logger.addHandler(file_handler)
+
+# 签到专用日志 — 单独文件,记录每次签到事件
+checkin_logger = logging.getLogger('Checkin')
+checkin_logger.setLevel(logging.INFO)
+checkin_handler = TimedRotatingFileHandler(
+    filename=os.path.join(LOG_DIR, 'checkin.log'),
+    when='midnight',
+    interval=1,
+    backupCount=30,
+    encoding='utf-8'
+)
+checkin_handler.setFormatter(LOG_FORMAT)
+checkin_logger.addHandler(checkin_handler)
+
+# 错误日志 — 记录所有异常
+error_logger = logging.getLogger('Error')
+error_logger.setLevel(logging.WARNING)
+error_handler = TimedRotatingFileHandler(
+    filename=os.path.join(LOG_DIR, 'error.log'),
+    when='midnight',
+    interval=1,
+    backupCount=30,
+    encoding='utf-8'
+)
+error_handler.setFormatter(LOG_FORMAT)
+error_logger.addHandler(error_handler)
+
+# Debug 模式会在 reloader 子进程中再次执行,避免日志重复
+_is_reloader_child = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
+
+if not _is_reloader_child:
+    # 控制台输出（仅 reloader 子进程输出,避免重复）
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(LOG_FORMAT)
+    app_logger.addHandler(console_handler)
+
+# Flask 内置 access log
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.handlers = []
+werkzeug_logger.addHandler(file_handler)
+if not _is_reloader_child:
+    werkzeug_logger.addHandler(console_handler)
 
 # ===================== 人脸识别模型初始化 =====================
 face_recognizer = None
@@ -39,14 +106,15 @@ def load_face_model():
         profile_detector = cv2.CascadeClassifier(
             cv2.data.haarcascades + 'haarcascade_profileface.xml')
         model_loaded = True
-        print('[OK] 人脸识别模型加载成功')
+        app_logger.info('人脸识别模型加载成功')
     except Exception as e:
-        print(f'[WARN] 人脸识别模型加载失败: {e}')
+        app_logger.warning(f'人脸识别模型加载失败: {e}')
+        error_logger.warning(f'模型加载失败: {e}')
         model_loaded = False
 
-load_face_model()
-
-# ===================== 数据库工具 =====================
+if not _is_reloader_child:
+    load_face_model()
+    init_db()
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -70,8 +138,6 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
-
-init_db()
 
 # ===================== 登录装饰器 =====================
 def login_required(f):
@@ -116,7 +182,7 @@ def recognize_face(image_base64):
         predicted_id = label_mapping.get(str(label))
         return predicted_id, confidence
     except Exception as e:
-        print(f'识别错误: {e}')
+        error_logger.error(f'人脸识别异常: {e}')
         return None, None
 
 # ===================== 页面路由 =====================
@@ -159,13 +225,16 @@ def api_login():
         row = cur.fetchone()
         conn.close()
         if not row:
+            app_logger.warning(f'学生登录失败: 学号 {username} 不存在')
             return jsonify({'success': False, 'message': '学号不存在'})
         if row['password'] != password:
+            app_logger.warning(f'学生登录失败: {username} {row["name"]} 密码错误')
             return jsonify({'success': False, 'message': '密码错误'})
         session['user_id'] = row['id']
         session['user_name'] = row['name']
         session['user_class'] = row['class']
         session['role'] = 'student'
+        app_logger.info(f'学生登录: {row["id"]} {row["name"]} ({row["class"]}班)')
         return jsonify({'success': True, 'redirect': '/student'})
 
     elif role == 'teacher':
@@ -175,12 +244,15 @@ def api_login():
         row = cur.fetchone()
         conn.close()
         if not row:
+            app_logger.warning(f'教师登录失败: 账号 {username} 不存在')
             return jsonify({'success': False, 'message': '教师账号不存在'})
         if row['password'] != password:
+            app_logger.warning(f'教师登录失败: {username} 密码错误')
             return jsonify({'success': False, 'message': '密码错误'})
         session['user_id'] = row['username']
         session['user_name'] = row['username']
         session['role'] = 'teacher'
+        app_logger.info(f'教师登录: {username}')
         return jsonify({'success': True, 'redirect': '/teacher'})
 
     conn.close()
@@ -234,6 +306,7 @@ def api_checkin():
     record = cur.fetchone()
     if record and record['is_signed'] == 1:
         conn.close()
+        checkin_logger.info(f'重复签到: {student_id} {session["user_name"]}')
         return jsonify({'success': False, 'message': '今天已签到，无需重复签到'})
 
     # 人脸识别
@@ -242,10 +315,13 @@ def api_checkin():
 
     if predicted_id is None:
         conn.close()
+        checkin_logger.warning(f'签到失败-未检测到人脸: {student_id} {session["user_name"]}')
         return jsonify({'success': False, 'message': '未检测到人脸，请对准摄像头'})
 
     if predicted_id != student_id:
         conn.close()
+        checkin_logger.warning(
+            f'签到失败-身份不匹配: {student_id} {session["user_name"]} 识别为 {predicted_id}')
         return jsonify({
             'success': False,
             'message': f'人脸验证失败，请确认是本人'
@@ -253,6 +329,8 @@ def api_checkin():
 
     if confidence is not None and confidence >= 125:
         conn.close()
+        checkin_logger.warning(
+            f'签到失败-置信度不足: {student_id} {session["user_name"]} confidence={confidence:.0f}')
         return jsonify({'success': False, 'message': '人脸匹配度不足，请调整光线和角度'})
 
     # 签到成功，更新记录
@@ -269,6 +347,10 @@ def api_checkin():
             (student_id, today_str, now_str))
     conn.commit()
     conn.close()
+
+    checkin_logger.info(
+        f'签到成功: {student_id} {session["user_name"]} 时间={now_str} confidence={confidence:.0f if confidence else "N/A"}')
+    app_logger.info(f'签到成功: {student_id} {session["user_name"]} {now_str}')
 
     return jsonify({
         'success': True,
@@ -341,6 +423,7 @@ def api_toggle_checkin():
                     (sid, today_str))
         conn.commit()
         conn.close()
+        app_logger.info(f'教师 {session["user_name"]} 开启签到 [{today_str} {now_str}]')
         return jsonify({'success': True, 'message': '签到已开启', 'active': True})
 
     elif action == 'stop':
@@ -349,6 +432,7 @@ def api_toggle_checkin():
             (now_str,))
         conn.commit()
         conn.close()
+        app_logger.info(f'教师 {session["user_name"]} 结束签到 [{today_str} {now_str}]')
         return jsonify({'success': True, 'message': '签到已结束', 'active': False})
 
     conn.close()
@@ -510,6 +594,7 @@ def api_edit_student():
                     (new_id, name, cls, old_id))
         conn.commit()
         conn.close()
+        app_logger.info(f'教师 {session["user_name"]} 修改学生: {old_id} -> {new_id} {name} ({cls}班)')
         return jsonify({'success': True, 'message': '修改成功'})
     except sqlite3.IntegrityError:
         conn.close()
@@ -536,6 +621,9 @@ def api_edit_record():
         (is_signed, rec_time, student_id, date_str))
     conn.commit()
     conn.close()
+    status_text = '已签到' if is_signed else '未签到'
+    app_logger.info(
+        f'教师 {session["user_name"]} 编辑签到: {student_id} {date_str} -> {status_text} {rec_time or ""}')
     return jsonify({'success': True, 'message': '签到记录已更新'})
 
 # ===================== API: 获取当前用户信息 =====================
@@ -551,10 +639,9 @@ def api_user_info():
 
 # ===================== 启动 =====================
 if __name__ == '__main__':
-    print('=' * 50)
-    print('  人脸识别签到系统')
-    print(f'  访问地址: http://localhost:5000')
-    print(f'  教师账号: admin / 123456')
-    print(f'  学生账号: 学号 / 123456')
-    print('=' * 50)
+    app_logger.info('=' * 50)
+    app_logger.info('人脸识别签到系统 启动')
+    app_logger.info(f'访问地址: http://localhost:5000')
+    app_logger.info(f'日志目录: {LOG_DIR}')
+    app_logger.info('=' * 50)
     app.run(host='0.0.0.0', port=5000, debug=True)

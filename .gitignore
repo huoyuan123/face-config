@@ -20,6 +20,9 @@ Thumbs.db
 dist/
 build/
 
+# Logs
+logs/
+
 # Database (optional - uncomment to exclude)
 # db1/attendance.db
 
