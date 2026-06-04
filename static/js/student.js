@@ -26,7 +26,8 @@ async function checkStatus() {
         const todayData = await todayResp.json();
 
         checkinActive = sessionData.active;
-        alreadySigned = todayData.signed;
+        // 只升级不降级: 签到成功 set true 后,不被旧请求的 false 覆盖
+        if (todayData.signed) alreadySigned = true;
         const btn = document.getElementById('checkinBtn');
         const statusEl = document.getElementById('checkinStatus');
 
