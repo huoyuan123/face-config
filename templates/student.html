@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学生端 - 人脸识别签到</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="topbar">
+        <h2>人脸签到系统 - 学生端</h2>
+        <div class="topbar-right">
+            <span id="userInfo"></span>
+            <button class="btn-logout" onclick="window.location.href='/api/logout'">退出登录</button>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="card">
+            <div class="card-title">人脸签到</div>
+            <div class="checkin-area">
+                <div class="checkin-left">
+                    <div class="video-container">
+                        <video id="video" autoplay playsinline></video>
+                        <canvas id="canvas"></canvas>
+                    </div>
+                    <div class="checkin-status" id="checkinStatus">
+                        等待教师开启签到...
+                    </div>
+                    <button class="btn-checkin" id="checkinBtn" disabled onclick="doCheckin()">
+                        签到
+                    </button>
+                </div>
+                <div class="records-right">
+                    <div class="card-title">我的签到记录</div>
+                    <div class="table-wrapper" style="max-height: 450px;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>日期</th>
+                                    <th>签到时间</th>
+                                    <th>状态</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recordsBody">
+                                <tr><td colspan="3" style="color:#999;">加载中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/student.js"></script>
+</body>
+</html>

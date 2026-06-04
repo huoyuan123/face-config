@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>教师端 - 签到管理</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="topbar">
+        <h2>人脸签到系统 - 教师端</h2>
+        <div class="topbar-right">
+            <span id="userInfo"></span>
+            <button class="btn-logout" onclick="window.location.href='/api/logout'">退出登录</button>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <!-- 签到控制 -->
+        <div class="card">
+            <div class="card-title">签到控制</div>
+            <div class="control-bar">
+                <button class="btn-toggle start" id="toggleBtn" onclick="toggleCheckin()">
+                    开启签到
+                </button>
+                <span id="sessionStatus" style="font-size:14px; color:#999;">当前签到: 未开启</span>
+                <span style="flex:1;"></span>
+                <label>班级:</label>
+                <select id="classFilter" onchange="refreshAll()">
+                    <option value="全部">全部</option>
+                </select>
+                <label>日期:</label>
+                <input type="date" id="datePicker" onchange="refreshRecords()">
+            </div>
+        </div>
+
+        <!-- 统计卡片 -->
+        <div class="stats-bar" id="statsBar">
+            <div class="stat-item">
+                <div class="stat-num" id="statTotal">0</div>
+                <div class="stat-label">总人数</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-num" id="statSigned" style="color:#27ae60;">0</div>
+                <div class="stat-label">已签到</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-num" id="statUnsigned" style="color:#e74c3c;">0</div>
+                <div class="stat-label">未签到</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-num" id="statRate">0%</div>
+                <div class="stat-label">签到率</div>
+            </div>
+        </div>
+
+        <!-- 签到记录表 -->
+        <div class="card">
+            <div class="card-title">签到记录</div>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>学号</th>
+                            <th>姓名</th>
+                            <th>班级</th>
+                            <th>签到状态</th>
+                            <th>签到时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recordsBody">
+                        <tr><td colspan="6" style="color:#999;">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 图表 -->
+        <div class="chart-row">
+            <div class="card chart-box">
+                <div class="card-title">今日签到占比</div>
+                <canvas id="pieChart"></canvas>
+            </div>
+            <div class="card chart-box">
+                <div class="card-title">近7天签到率趋势</div>
+                <canvas id="lineChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑弹窗 -->
+    <div class="modal-overlay" id="editModal">
+        <div class="modal">
+            <h3 id="modalTitle">编辑</h3>
+            <div id="modalContent"></div>
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="closeModal()">取消</button>
+                <button class="btn-save" id="modalSave" onclick="saveModal()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/teacher.js"></script>
+</body>
+</html>
